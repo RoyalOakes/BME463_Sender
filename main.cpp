@@ -33,7 +33,7 @@ Serial receiver(D1,D0);
 // our Nucleo board A3 = CS, A4 = SCK, A5 = MISO, A6 = MOSI, VCC = 5V, GND
 SDFileSystem sd(A6, A5, A4, A3, "sd");  
 
-DigitalOut out(D10);        // Digital output for use as a debugging flag
+//DigitalOut out(D10);        // Digital output for use as a debugging flag
 Ticker SampleTicker;        // Ticker for ISR
 
 float SampleRate = 360.0;   // Sampling frequency of the ISR
@@ -139,6 +139,9 @@ int main() {
     pc.baud(115200);
     pc.printf("\33[2J\r");
     STARTOVER:
+    lidx = 0;
+    ridx = 0;   
+    rblk = 0;
     if(fp != NULL) {
         fclose(fp);
     }
