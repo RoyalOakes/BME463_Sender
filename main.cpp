@@ -21,7 +21,7 @@
 
 const int BLK_SIZE = 512; // Block size of SD card in bytes
 const int BLK_NUM = 4;    // Number of blocks to be loaded during runtime
-const int DP_SIZE = 10;   // Number of bytes in a single data point
+int DP_SIZE = 10;   // Number of bytes in a single data point
 
 Serial pc(USBTX,USBRX);
 
@@ -58,14 +58,90 @@ typedef union _data { // Use this to send a 2 byte value to pc and device
     char h[sizeof(short)];
 } myShort;
 
+// CLI user interface
+int s = 0;
+char const max_cmd = 30;
+char cmd_buf[max_cmd] = {0};
+
 // Function prototypes
 void loadc(void);
 char readc(void);
 void send_sp(void);
 
+uint32_t _f_read_dpsize(FILE* fp) {
+    uint32_t i = 0;
+    uint32_t limit = 100;
+    uint32_t dp_size;
+    char temp[64] = {0};
+    char hold = 0;
+
+    fseek(fp, 0, SEEK_SET);
+
+    while(i < limit) {
+        hold = (char) fgetc(fp);
+        if (hold == (char) EOF || hold == '\r' || hold == '\n') {
+            break;
+        }
+        i++;
+    } 
+
+    if (hold == (char) EOF || i >= limit) { // EOF reached before first delimiter
+        return 0;
+    }
+
+    if (hold == '\r') { // Windows CRLF
+        dp_size = i + 2;
+    }
+
+    if (hold == '\n') { // UNIX LF
+        dp_size = i + 1;
+    }
+    DP_SIZE = dp_size;
+    return dp_size;
+}
+
+void get_cmd(void) {
+    s = 0;
+    char temp = 0;
+    while (1) {
+        if (pc.readable()) {
+            temp = pc.getc();
+        }
+
+        switch (temp) {
+            case 0x00: // Nothing has been pressed.
+                break;
+            case 0x0d: // Enter is pressed.
+            case 0x0a:
+                cmd_buf[s] = '\0';
+                return;
+            case 0x7f: // Backspace or delete has been pressed.
+            case 0x7e:
+                pc.printf("\33[2K\r");
+                s = -1;
+                return;
+            default:   // A character has been pressed.
+                cmd_buf[s++] = temp;
+                temp = 0;
+                pc.printf("%c", cmd_buf[s-1]);
+        }
+
+        if (s >= max_cmd) {
+            pc.printf("\33[2K\r");
+            pc.printf("Input Buffer Overflow. Buffer Flushed.\n\r");
+            s = -1;
+            return;
+        }
+    }
+}
+
 int main() {
     pc.baud(115200);
-    pc.printf("\r\n--------------- START ---------------\r\n");
+    pc.printf("\33[2J\r");
+    STARTOVER:
+    pc.printf("\r\n--------------- Welcome! ---------------");
+    pc.printf("\r\n     BME 463 File Reader, Version 2     ");
+    pc.printf("\r\n---------------- START! ----------------\r\n");
 
     receiver.baud(115200);
 
@@ -74,11 +150,14 @@ int main() {
     // Open the directory with ECG files
     struct dirent *dirp;
     if ((dp = opendir("/sd/MITBIH")) == NULL) { 
-        pc.printf("MITBIH directory not found.\n");
-        exit(1);
+        pc.printf("\r\nMITBIH directory not found.");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
     }
     
-    pc.printf("Available files in MITBIH:\n");
+    pc.printf("\r\nAvailable files in MITBIH:");
     
     //unsigned int nfiles = 0;
     int fsize = 0;
@@ -89,79 +168,141 @@ int main() {
         
        // Get file size
         fp = fopen(buff, "r");
+        _f_read_dpsize(fp);
         fseek(fp, 0, SEEK_END);
         fsize = ftell(fp) / DP_SIZE;
         fclose(fp);
         
-        pc.printf("%s [0,%d)\n",dirp->d_name, fsize);
+        pc.printf("\r\n%s [0,%d)",dirp->d_name, fsize);
     }
     
     if (nfiles == 0) {
-        pc.printf("There are no available files in MITBIH\n");
-        exit(1);
+        pc.printf("\r\nThere are no available files in MITBIH.");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
     }
     
     // Get file to run
-    pc.printf("\nPlease choose a file to run: ");
-    scanf("%s", &buff[11]);
-    
-    pc.printf("%s\n", &buff[11]);
-    
-    // Get start time
-    pc.printf("Start: ");
-    scanf("%d", &fstart);
-    
-    pc.printf("%d\n", fstart);
-    fstart *= DP_SIZE;
-    
-    // Get end time
-    pc.printf("End (zero runs to end of file): ");
-    scanf("%d", &fend);
-    
-    pc.printf("%d\n", fend);
-    fend *= DP_SIZE;
-    
+    pc.printf("\r\n\r\n");
+    s = -1;
+    while (s == -1) {
+        pc.printf("Please choose a file to run: ");
+        get_cmd();
+    }
+    sscanf(cmd_buf, "%s", &buff[11]);
+    //scanf("%s", &buff[11]);
+    //pc.printf("\r\n%s", &buff[11]);
+
     // Open the file 
     if ((fp = fopen(buff, "r")) == NULL) { // Open the file
-        pc.printf("Could not open \"%s\"\n", buff);
-        exit(1);
+        pc.printf("\r\nCould not open \"%s\".", buff);
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
     }
+    _f_read_dpsize(fp);
     
+    // Get start time
+    pc.printf("\r\n");
+    s = -1;
+    while (s == -1) {
+        pc.printf("Choose start position: ");
+        get_cmd();
+    }
+    sscanf(cmd_buf, "%d", &fstart);
+    fstart *= DP_SIZE;
+    // pc.printf("\r\nStart: ");
+    // scanf("%d", &fstart);
+    // pc.printf("%d", fstart);
+    
+    // Get end time
+    pc.printf("\r\n");
+    s = -1;
+    while (s == -1) {
+        pc.printf("Choose end position (zero runs to end of file): ");
+        get_cmd();
+    }
+    sscanf(cmd_buf, "%d", &fend);
+    fend *= DP_SIZE;
+    // pc.printf("\r\nEnd (zero runs to end of file): ");
+    // scanf("%d", &fend);
+    // pc.printf("%d", fend);
+
     // Check that start and end are appropriate
     fseek(fp, 0, SEEK_END);
     fsize = ftell(fp);
     if (fstart > fend && fend != 0) {
-        pc.printf("Start position is larger than end position");
-        exit(1);
+        pc.printf("\r\nStart position is larger than end position.");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
     }
     
     if (fstart >= fsize) { 
-        pc.printf("Start position is larger than file size");
-        exit(1);
+        pc.printf("\r\nStart position is larger than file size");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
     }
     
     if (fend >= fsize || fend == 0) { // if fend is too large or zero, run to the end of the file
         fend = fsize;
     }
+
+    pc.printf("\r\n");
+    s = -1;
+    while (s == -1) {
+        pc.printf("Enter sample frequency (Hz): ");
+        get_cmd();
+    }
+    
+    sscanf(cmd_buf, "%f", &SampleRate);
+
+    if (SampleRate <= 0) {
+        pc.printf("\r\nSample Frequency too low!");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
+    }
+
+    if (SampleRate > 1000) {
+        pc.printf("\r\nSample Frequency too high!");
+        pc.printf("\r\nPress any key to restart.");
+        while(!pc.readable());
+        pc.getc();
+        goto STARTOVER;
+    }
     
     fseek(fp, fstart, SEEK_SET);             // Move the pointer to fstart
     SamplePeriod = (float) 1.0f/SampleRate;  // Calculate the sample period 
     
-    t.start();  // Timer for debugging                          
+    //t.start();  // Timer for debugging                          
     
     // Load data from SD card and fill dbuff
     for (int i = 0; i < BLK_NUM*BLK_SIZE; i++)
         loadc();
+
+    pc.printf("\r\n\r\n~oOo~ File Running ~oOo~\r\n");
     
     // Start sending data
     SampleTicker.attach(&send_sp,SamplePeriod);
     
     // Load new bytes into dbuff if ridx is close to lidx
+    int d = 0;
+    int dots = 0;
+    int d_thresh = 500000;
+    int dots_clear = 4;
     while(1) {
-        if (feof(fp)) {     // If we have reached the end of the file...
-            fclose(fp);         // Close the file
-            sd.unmount();       // Unmount the SD card (whatever that means)
-        } 
+        // if (feof(fp)) {     // If we have reached the end of the file...
+        //     fclose(fp);         // Close the file
+        //     sd.unmount();       // Unmount the SD card (whatever that means)
+        // } 
         
         // Check if ridx has moved beyond the current blk
         if (rblk < BLK_NUM - 1 && ridx >= BLK_SIZE * (rblk+1)) {
@@ -175,6 +316,30 @@ int main() {
             
             rblk = 0;
         } else {
+        }
+
+        if (pc.readable()) {
+            pc.getc();
+            SampleTicker.detach();
+            pc.printf("\r\nSTART OVER!\r\n");
+            goto STARTOVER;
+        }
+
+        if (d++ >= d_thresh) {
+            if (dots < dots_clear - 1) {
+                pc.printf(". ");
+                dots++;
+                d = 0;
+            } else {
+                dots++;
+                d = 0;
+            }
+            
+        }
+
+        if (dots >= dots_clear) {
+            pc.printf("\33[2K\r");
+            dots = 0;
         }
     } // end while
 } // end main
@@ -220,7 +385,7 @@ void send_sp(void) {
     tbuff[DP_SIZE - 1] = '\0';
     
     // Convert string to short
-    temp.s = (short) atoi(&tbuff[5]);
+    sscanf(tbuff, "%hu", &temp.s);
     
     // Send data
     for (int i = 0; i < sizeof(short); i++)
@@ -228,6 +393,6 @@ void send_sp(void) {
     receiver.putc('\0');
     
     // Debugging print.
-    pc.printf("%hi,%f\n", temp.s, t.read());
+    //pc.printf("%hi,%f\n", temp.s, t.read());
     return;
 }
