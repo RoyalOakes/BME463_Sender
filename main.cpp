@@ -39,8 +39,8 @@ Ticker SampleTicker;        // Ticker for ISR
 float SampleRate = 360.0;   // Sampling frequency of the ISR
 float SamplePeriod;         // Sampling period for the ISR
 
-FILE *fp;                   // Initialize pointer to our file
-DIR *dp;                    // Directory pointer
+FILE *fp = NULL;                   // Initialize pointer to our file
+DIR *dp = NULL;                    // Directory pointer
 
 // Variables for circular buffer
 char dbuff[BLK_NUM*BLK_SIZE];   // Buffer for data
@@ -139,6 +139,10 @@ int main() {
     pc.baud(115200);
     pc.printf("\33[2J\r");
     STARTOVER:
+    if(fp != NULL) {
+        fclose(fp);
+    }
+    sd.unmount();
     pc.printf("\r\n--------------- Welcome! ---------------");
     pc.printf("\r\n     BME 463 File Reader, Version 2     ");
     pc.printf("\r\n---------------- START! ----------------\r\n");
